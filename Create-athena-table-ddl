@@ -1,0 +1,8 @@
+CREATE EXTERNAL TABLE IF NOT EXISTS cloudtechinsights.s3regulartable 
+    ( 
+    name STRING, 
+    age int, 
+    sex STRING
+    )
+ROW FORMAT DELIMITED FIELDS TERMINATED BY ',' STORED AS TEXTFILE
+LOCATION '<S3 location express or standard>'
