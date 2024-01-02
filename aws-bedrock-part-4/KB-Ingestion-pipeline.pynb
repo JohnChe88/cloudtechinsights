@@ -1,0 +1,1537 @@
+{
+ "cells": [
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# Knowledge Bases for Amazon Bedrock - Ingestion Data Source pipeline "
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "### Why OpenSearch is an Ideal Vector Database for Large Language Models (LLMs)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "\n",
+    "OpenSearch is increasingly used as a vector database for LLMs due to its capabilities in handling and searching high-dimensional vector data. Here are the key reasons:\n",
+    "\n",
+    "1. **Handling High-Dimensional Vectors**:\n",
+    "   - LLMs like 'amazon.titan-embed-text-v' transform textual data into high-dimensional vectors or embeddings, capturing semantic meanings numerically.\n",
+    "   - OpenSearch efficiently stores and indexes these vectors, making it suitable for LLM outputs.\n",
+    "\n",
+    "2. **Vector Search Capabilities**:\n",
+    "   - It supports vector search through the K-Nearest Neighbors (KNN) feature, essential for similarity searches.\n",
+    "   - This is vital for applications like semantic search, recommendation systems, and content discovery.\n",
+    "\n",
+    "3. **Scalability and Performance**:\n",
+    "   - OpenSearch is designed for large datasets and offers horizontal scalability, a necessity for LLMs that generate large volumes of data.\n",
+    "\n",
+    "4. **Flexible Integration with Machine Learning Tools**:\n",
+    "   - The platform can be easily integrated with various machine learning and data processing tools.\n",
+    "   - This facilitates the direct pipelining of LLM outputs into the database for indexing and searching.\n",
+    "\n",
+    "5. **Real-Time Search and Analytics**:\n",
+    "   - OpenSearch provides real-time search and analytics capabilities.\n",
+    "   - Newly indexed vector data becomes immediately searchable, crucial for dynamic applications.\n",
+    "\n",
+    "6. **Community and Ecosystem Support**:\n",
+    "   - As an open-source project, OpenSearch benefits from continuous improvements, including better vector data handling and machine learning model integrations.\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "# High Level Steps :\n",
+    "\n",
+    "## Introduction and Setup\n",
+    "\n",
+    "- Overview of using OpenSearch with Large Language Models (LLMs).\n",
+    "- Initial setup includes installing necessary libraries and setting up a connection to Amazon Bedrock.\n",
+    "\n",
+    "## Step 1 : Creating Amazon Bedrock Execution Role\n",
+    "\n",
+    "- Steps to create an execution role with policies for Amazon Bedrock Knowledge Base, focusing on S3 data access and embedding writing in Amazon OpenSearch Serverless (AOSS).\n",
+    "\n",
+    "## Step 2 : Setting Up Amazon OpenSearch Serverless collection\n",
+    "\n",
+    "- Instructions on how to set up an empty AOSS index and collection.\n",
+    "- Discussion about the concept of a collection in Amazon OpenSearch Serverless as a logical grouping of indexes.\n",
+    "\n",
+    "## Step 3 : Creating the OpenSearch Client and Index\n",
+    "\n",
+    "- Creation of an OpenSearch client using `opensearchpy` and setting up an index with specific configurations for vector and text fields.\n",
+    "\n",
+    "## Step 4 : Uploading Documents to Amazon S3\n",
+    "\n",
+    "- Step-by-step guide on copying necessary documents from a local source to an Amazon S3 bucket.\n",
+    "\n",
+    "## Step 5 : Establishing Amazon Bedrock Knowledge Base\n",
+    "\n",
+    "- Detailed steps for establishing a knowledge base in Amazon Bedrock, including configuring OpenSearch Serverless, chunking strategy, S3 settings, and embedding model.\n",
+    "\n",
+    "## Step 6 : Creating and Managing Data Source in Knowledge Base\n",
+    "\n",
+    "- Procedures for creating and retrieving a data source within the knowledge base, linking it to Amazon S3, and starting an ingestion job.\n",
+    "## Step 7 : Creating the Sync or Ingesiton job\n",
+    "\n",
+    "## Step 8 : Testing the Knowledge Base\n",
+    "\n",
+    "- Instructions on how to test the knowledge base using RetrieveAndGenerate API and Retrieve API, including interpreting the output and understanding source attribution.\n",
+    "\n",
+    "## Step 9 : Cleanup\n",
+    "\n",
+    "- Final steps to clean up and delete all the resources created during the notebook execution to avoid unnecessary costs.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 1,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import warnings\n",
+    "warnings.filterwarnings('ignore')"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Setup \n",
+    "Before running the rest of this notebook, you'll need to run the cells below to (ensure necessary libraries are installed and) connect to Bedrock."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 2,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Requirement already satisfied: opensearch-py==2.3.1 in /opt/conda/lib/python3.10/site-packages (2.3.1)\n",
+      "Requirement already satisfied: urllib3<2,>=1.21.1 in /opt/conda/lib/python3.10/site-packages (from opensearch-py==2.3.1) (1.26.18)\n",
+      "Requirement already satisfied: requests<3.0.0,>=2.4.0 in /opt/conda/lib/python3.10/site-packages (from opensearch-py==2.3.1) (2.31.0)\n",
+      "Requirement already satisfied: six in /opt/conda/lib/python3.10/site-packages (from opensearch-py==2.3.1) (1.16.0)\n",
+      "Requirement already satisfied: python-dateutil in /opt/conda/lib/python3.10/site-packages (from opensearch-py==2.3.1) (2.8.2)\n",
+      "Requirement already satisfied: certifi>=2022.12.07 in /opt/conda/lib/python3.10/site-packages (from opensearch-py==2.3.1) (2023.7.22)\n",
+      "Requirement already satisfied: charset-normalizer<4,>=2 in /opt/conda/lib/python3.10/site-packages (from requests<3.0.0,>=2.4.0->opensearch-py==2.3.1) (3.3.2)\n",
+      "Requirement already satisfied: idna<4,>=2.5 in /opt/conda/lib/python3.10/site-packages (from requests<3.0.0,>=2.4.0->opensearch-py==2.3.1) (3.4)\n",
+      "Note: you may need to restart the kernel to use updated packages.\n",
+      "Requirement already satisfied: boto3==1.33.2 in /opt/conda/lib/python3.10/site-packages (1.33.2)\n",
+      "Requirement already satisfied: botocore<1.34.0,>=1.33.2 in /opt/conda/lib/python3.10/site-packages (from boto3==1.33.2) (1.33.13)\n",
+      "Requirement already satisfied: jmespath<2.0.0,>=0.7.1 in /opt/conda/lib/python3.10/site-packages (from boto3==1.33.2) (1.0.1)\n",
+      "Requirement already satisfied: s3transfer<0.9.0,>=0.8.0 in /opt/conda/lib/python3.10/site-packages (from boto3==1.33.2) (0.8.2)\n",
+      "Requirement already satisfied: python-dateutil<3.0.0,>=2.1 in /opt/conda/lib/python3.10/site-packages (from botocore<1.34.0,>=1.33.2->boto3==1.33.2) (2.8.2)\n",
+      "Requirement already satisfied: urllib3<2.1,>=1.25.4 in /opt/conda/lib/python3.10/site-packages (from botocore<1.34.0,>=1.33.2->boto3==1.33.2) (1.26.18)\n",
+      "Requirement already satisfied: six>=1.5 in /opt/conda/lib/python3.10/site-packages (from python-dateutil<3.0.0,>=2.1->botocore<1.34.0,>=1.33.2->boto3==1.33.2) (1.16.0)\n",
+      "Note: you may need to restart the kernel to use updated packages.\n",
+      "Requirement already satisfied: retrying==1.3.4 in /opt/conda/lib/python3.10/site-packages (1.3.4)\n",
+      "Requirement already satisfied: six>=1.7.0 in /opt/conda/lib/python3.10/site-packages (from retrying==1.3.4) (1.16.0)\n",
+      "Note: you may need to restart the kernel to use updated packages.\n"
+     ]
+    }
+   ],
+   "source": [
+    "%pip install -U opensearch-py==2.3.1\n",
+    "%pip install -U boto3==1.33.2\n",
+    "%pip install -U retrying==1.3.4"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 3,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "data": {
+      "text/html": [
+       "<script>Jupyter.notebook.kernel.restart()</script>"
+      ],
+      "text/plain": [
+       "<IPython.core.display.HTML object>"
+      ]
+     },
+     "execution_count": 3,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# restart kernel for the installation\n",
+    "\n",
+    "from IPython.core.display import HTML\n",
+    "HTML(\"<script>Jupyter.notebook.kernel.restart()</script>\")"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "##  Step 1 : Creating Amazon Bedrock Execution Role\n",
+    "### Importing the Libraries and creating bedrock agent client"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 4,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import json\n",
+    "import os\n",
+    "import boto3\n",
+    "import pprint\n",
+    "from utility import create_bedrock_execution_role, create_oss_policy_attach_bedrock_execution_role, create_policies_in_oss\n",
+    "import random\n",
+    "from retrying import retry\n",
+    "suffix = random.randrange(200, 900)\n",
+    "\n",
+    "boto3_session = boto3.session.Session()\n",
+    "region_name = boto3_session.region_name\n",
+    "\n",
+    "bedrock_agent_client = boto3_session.client('bedrock-agent', region_name=region_name)\n",
+    "\n",
+    "service = 'aoss'\n",
+    "bucket_name = \"bedrock-fine-tuning-cloud\" # replace it with your bucket name.\n",
+    "pp = pprint.PrettyPrinter(indent=2)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": []
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 5,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Execution role with Bucket permission \n",
+    "bedrock_kb_execution_role = create_bedrock_execution_role(bucket_name=bucket_name)\n",
+    "\n",
+    "# Execution role for Amazon Bedrock\n",
+    "bedrock_kb_execution_role_arn = bedrock_kb_execution_role['Role']['Arn']"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Step 2 : Setting Up Amazon OpenSearch Serverless Index\n",
+    "- Instructions on how to set up an empty AOSS index and collection.\n",
+    "- Discussion about the concept of a collection in Amazon OpenSearch Serverless as a logical grouping of indexes.\n",
+    "\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 6,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import boto3\n",
+    "import time\n",
+    "\n",
+    "\n",
+    "vector_store_name = f'bedrock-sample-rag-{suffix}'\n",
+    "\n",
+    "#table name equivalent in Amazon Opensearch\n",
+    "index_name = f\"bedrock-sample-rag-index-{suffix}\"\n",
+    "\n",
+    "#creating a client for Amazon Opensearch Serverless\n",
+    "aoss_client = boto3_session.client('opensearchserverless')\n",
+    "\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "\n",
+    "#### A collection in Amazon OpenSearch Serverless is a logical grouping of one or more indexes that represent an analytics workload. \n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 7,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# create security, network and data access policies within OSS\n",
+    "encryption_policy, network_policy, access_policy = create_policies_in_oss(vector_store_name=vector_store_name,\n",
+    "                       aoss_client=aoss_client,\n",
+    "                       bedrock_kb_execution_role_arn=bedrock_kb_execution_role_arn)\n",
+    "\n",
+    "\n",
+    "# Creating collection. type='VECTORSEARCH' this implies that the collection is intended for vector search operations. \n",
+    "collection = aoss_client.create_collection(name=vector_store_name,type='VECTORSEARCH')"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 8,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{ 'ResponseMetadata': { 'HTTPHeaders': { 'content-length': '314',\n",
+      "                                         'content-type': 'application/x-amz-json-1.0',\n",
+      "                                         'date': 'Fri, 29 Dec 2023 21:30:21 '\n",
+      "                                                 'GMT',\n",
+      "                                         'x-amzn-requestid': 'f27c53e7-1bea-43a8-8d20-9b65fa10e1ba'},\n",
+      "                        'HTTPStatusCode': 200,\n",
+      "                        'RequestId': 'f27c53e7-1bea-43a8-8d20-9b65fa10e1ba',\n",
+      "                        'RetryAttempts': 0},\n",
+      "  'createCollectionDetail': { 'arn': 'arn:aws:aoss:us-east-1:133661573128:collection/ivu3jemv7yerqjgqfu0i',\n",
+      "                              'createdDate': 1703885421972,\n",
+      "                              'id': 'ivu3jemv7yerqjgqfu0i',\n",
+      "                              'kmsKeyArn': 'auto',\n",
+      "                              'lastModifiedDate': 1703885421972,\n",
+      "                              'name': 'bedrock-sample-rag-345',\n",
+      "                              'standbyReplicas': 'ENABLED',\n",
+      "                              'status': 'CREATING',\n",
+      "                              'type': 'VECTORSEARCH'}}\n"
+     ]
+    }
+   ],
+   "source": [
+    "pp.pprint(collection)\n",
+    "time.sleep(10)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "#### Creating the AOSS host name string "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 9,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "ivu3jemv7yerqjgqfu0i.us-east-1.aoss.amazonaws.com\n"
+     ]
+    }
+   ],
+   "source": [
+    "collection_id = collection['createCollectionDetail']['id']\n",
+    "host = collection_id + '.' + region_name + '.aoss.amazonaws.com'\n",
+    "print(host)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 10,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Opensearch serverless arn:  arn:aws:iam::133661573128:policy/AmazonBedrockOSSPolicyForKnowledgeBase_873\n"
+     ]
+    }
+   ],
+   "source": [
+    "# create oss policy and attach it to Bedrock execution role\n",
+    "create_oss_policy_attach_bedrock_execution_role(collection_id=collection_id,\n",
+    "                                                bedrock_kb_execution_role=bedrock_kb_execution_role)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "##  Create vector index\n",
+    "\n",
+    "This code snippet is designed to set up an OpenSearch index using the `opensearchpy` library in Python. It integrates with AWS services for authentication and index creation. Let's break down the steps:\n",
+    "\n",
+    "1. **Import Libraries and Setup Authentication**:\n",
+    "   - `credentials = boto3.Session().get_credentials()`: Retrieves AWS credentials from the current session using `boto3`, an AWS SDK for Python.\n",
+    "   - `awsauth = AWSV4SignerAuth(credentials, region_name, service)`: Initializes the AWS V4 signer authentication, which will be used to securely connect to OpenSearch.\n",
+    "\n",
+    "2. **Define Index Name and Configuration**:\n",
+    "   - `oss index`: \n",
+    "An index in AMAZON Opensearch is a collection of documents with similar characteristics, akin to a database in a traditional relational database. It's defined by settings and mappings which specify its configuration, such as sharding and replication, and the schema for the data it stores, like data types and index-specific settings.\n",
+    "   - `index_name = f\"bedrock-sample-index-{suffix}\"`: Sets the OSS index name with a unique suffix.\n",
+    "   - `body_json`: Defines the JSON object for OSS index settings and mappings.\n",
+    "       - `settings` with `\"index.knn\": \"true\"`: Enables KNN (K-Nearest Neighbors) on the index for similarity search.\n",
+    "       - `Why KNN`: K-Nearest Neighbors (KNN) in OpenSearch configuration is used for similarity search, which is essential for applications requiring efficient and accurate retrieval of similar items from large datasets. By enabling KNN, OpenSearch can quickly find the \"nearest\" data points in a high-dimensional space, making it highly effective for tasks like recommendation systems, image search, and document retrieval, where the similarity between items is based on vector representations.\n",
+    "       - `mappings`: Specifies the schema of the index.\n",
+    "           - `vector`: A KNN vector field with a specified dimension (1536 in this case).\n",
+    "           - `text`: A standard text field.\n",
+    "           - `text-metadata`: Another text field for additional metadata.\n",
+    "\n",
+    "4. **Create OpenSearch Client**:\n",
+    "   - `oss_client = OpenSearch(...)`: Creates an OpenSearch client instance.\n",
+    "       - `hosts`: Specifies the OpenSearch cluster endpoint.\n",
+    "       - `http_auth`: Sets the AWS authentication method.\n",
+    "       - `use_ssl`, `verify_certs`: Ensures secure SSL communication.\n",
+    "       - `connection_class`: Uses `RequestsHttpConnection` for making HTTP requests.\n",
+    "       - `timeout`: Sets a timeout value for the client requests.\n",
+    "\n",
+    "5. **Allow Time for Data Access Rules Enforcement**:\n",
+    "   - `time.sleep(60)`: Waits for 60 seconds. This delay ensures that any data access rules or permissions are fully propagated and enforced before any operations are performed on the index.\n",
+    "\n",
+    "This setup is typically used in scenarios where you need to create an OpenSearch index for text and vector-based search, leveraging AWS for secure and scalable data handling.\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Step 3 : Creating the OpenSearch Client and Index"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 11,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "from opensearchpy import OpenSearch, RequestsHttpConnection, AWSV4SignerAuth\n",
+    "credentials = boto3.Session().get_credentials()\n",
+    "awsauth = auth = AWSV4SignerAuth(credentials, region_name, service)\n",
+    "\n",
+    "index_name = f\"bedrock-sample-index-{suffix}\"\n",
+    "\n",
+    "\n",
+    "body_json = {\n",
+    "   \"settings\": {\n",
+    "      \"index.knn\": \"true\"\n",
+    "   },\n",
+    "   \"mappings\": {\n",
+    "      \"properties\": {\n",
+    "         \"vector\": {\n",
+    "            \"type\": \"knn_vector\",\n",
+    "            \"dimension\": 1536\n",
+    "         },\n",
+    "         \"text\": {\n",
+    "            \"type\": \"text\"\n",
+    "         },\n",
+    "         \"text-metadata\": {\n",
+    "            \"type\": \"text\"         }\n",
+    "      }\n",
+    "   }\n",
+    "}\n",
+    "# Build the OpenSearch client\n",
+    "oss_client = OpenSearch(\n",
+    "    hosts=[{'host': host, 'port': 443}],\n",
+    "    http_auth=awsauth,\n",
+    "    use_ssl=True,\n",
+    "    verify_certs=True,\n",
+    "    connection_class=RequestsHttpConnection,\n",
+    "    timeout=300\n",
+    ")\n",
+    "# # It can take up to a minute for data access rules to be enforced\n",
+    "time.sleep(60)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 12,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "\n",
+      "Creating index:\n",
+      "{'acknowledged': True, 'shards_acknowledged': True, 'index': 'bedrock-sample-index-345'}\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Creating an empty index in Amazon Opensearch using the client oss_client\n",
+    "response = oss_client.indices.create(index=index_name, body=json.dumps(body_json))\n",
+    "print('\\nCreating index:')\n",
+    "print(response)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "## Step 4 : Uploading Documents to Amazon S3\n",
+    "\n",
+    "### Dataset\n",
+    "Reasearch papers on Quantom Computing in the local folder /data"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 13,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "import boto3\n",
+    "import os\n",
+    "\n",
+    "# Initialize S3 client\n",
+    "s3_client = boto3.client(\"s3\")\n",
+    "\n",
+    "def uploadDirectory(path, bucket_name, folder_name=''):\n",
+    "    for root, dirs, files in os.walk(path):\n",
+    "        for file in files:\n",
+    "            # Create full file path\n",
+    "            file_path = os.path.join(root, file)\n",
+    "\n",
+    "            # Create the S3 key with folder name (if provided) and preserving directory structure\n",
+    "            s3_key = os.path.join(folder_name, os.path.relpath(file_path, start=path))\n",
+    "\n",
+    "            # Upload file to S3\n",
+    "            s3_client.upload_file(file_path, bucket_name, s3_key)\n",
+    "\n",
+    "# Example usage\n",
+    "data_root = 'data/'  # Set your local directory path\n",
+    "bucket_name = 'bedrock-fine-tuning-cloud'        # Set your S3 bucket name\n",
+    "folder_name = 'knowledge-base'           # Set your folder name (optional)\n",
+    "\n",
+    "uploadDirectory(data_root, bucket_name, folder_name)\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "## Step 5 : Establishing Amazon Bedrock Knowledge Base.\n",
+    "This code configures various components for setting up a knowledge base with Amazon Bedrock and OpenSearch. Let's break down each part of the configuration:\n",
+    "\n",
+    "1. **OpenSearch Serverless Configuration**:\n",
+    "   - `opensearchServerlessConfiguration`: This dictionary configures how the knowledge base will interact with an OpenSearch serverless instance.\n",
+    "       - `collectionArn`: The Amazon Resource Name (ARN) of the collection in OpenSearch. It is retrieved from the `createCollectionDetail` of the collection object.\n",
+    "       - `vectorIndexName`: Name of the index in OpenSearch, specified by `index_name`.\n",
+    "       - `fieldMapping`: Defines the mapping between the knowledge base fields and the OpenSearch fields. It includes the vector field for embeddings, a text field for textual data, and a metadata field.\n",
+    "\n",
+    "2. **Chunking Strategy Configuration**:\n",
+    "   - `chunkingStrategyConfiguration`: Specifies how the text data should be chunked before being processed.\n",
+    "       - `chunkingStrategy`: The strategy used for chunking, set to `\"FIXED_SIZE\"` here.\n",
+    "       - `fixedSizeChunkingConfiguration`: Configuration for the fixed-size chunking, including `maxTokens` (maximum number of tokens per chunk) and `overlapPercentage` (percentage of overlap between chunks).\n",
+    "\n",
+    "3. **S3 Configuration**:\n",
+    "   - `s3Configuration`: This configures the connection to an S3 bucket.\n",
+    "       - `bucketArn`: The ARN for the S3 bucket, constructed using the `bucket_name`.\n",
+    "       - `inclusionPrefixes`: (Commented out) If enabled, this allows filtering of data from S3 based on specific prefixes.\n",
+    "\n",
+    "4. **Embedding Model Configuration**:\n",
+    "   - `embeddingModelArn`: The ARN for the Amazon Bedrock embedding model, specifying the region and model name (`amazon.titan-embed-text-v1`).\n",
+    "\n",
+    "5. **Knowledge Base Details**:\n",
+    "   - `name`: The name assigned to the knowledge base, appended with a unique `suffix`.\n",
+    "   - `description`: A brief description of the knowledge base's purpose.\n",
+    "   - `roleArn`: The ARN of the IAM role used by the knowledge base, stored in `bedrock_kb_execution_role_arn`.\n",
+    "\n",
+    "In summary, this configuration sets up the necessary parameters for creating a knowledge base that leverages Amazon Bedrock for embeddings and OpenSearch for indexing and searching, with data sourced from an S3 bucket.\n"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 14,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "opensearchServerlessConfiguration = {\n",
+    "            \"collectionArn\": collection[\"createCollectionDetail\"]['arn'],\n",
+    "            \"vectorIndexName\": index_name,\n",
+    "            \"fieldMapping\": {\n",
+    "                \"vectorField\": \"vector\",\n",
+    "                \"textField\": \"text\",\n",
+    "                \"metadataField\": \"text-metadata\"\n",
+    "            }\n",
+    "        }\n",
+    "\n",
+    "chunkingStrategyConfiguration = {\n",
+    "    \"chunkingStrategy\": \"FIXED_SIZE\",\n",
+    "    \"fixedSizeChunkingConfiguration\": {\n",
+    "        \"maxTokens\": 512,\n",
+    "        \"overlapPercentage\": 20\n",
+    "    }\n",
+    "}\n",
+    "\n",
+    "s3Configuration = {\n",
+    "    \"bucketArn\": f\"arn:aws:s3:::{bucket_name}\",\n",
+    "    # \"inclusionPrefixes\":[\"*.*\"] # you can use this if you want to create a KB using data within s3 prefixes.\n",
+    "}\n",
+    "\n",
+    "embeddingModelArn = f\"arn:aws:bedrock:{region_name}::foundation-model/amazon.titan-embed-text-v1\"\n",
+    "\n",
+    "name = f\"bedrock-quantum-computing-knowledge-base-{suffix}\"\n",
+    "description = \"Quantum computing Knowledgebase\"\n",
+    "roleArn = bedrock_kb_execution_role_arn\n"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "Provide the above configurations as input to the `create_knowledge_base` method, which will create the Knowledge base."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 15,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Create a KnowledgeBase\n",
+    "from retrying import retry\n",
+    "\n",
+    "@retry(wait_random_min=1000, wait_random_max=2000,stop_max_attempt_number=7)\n",
+    "def create_knowledge_base_func():\n",
+    "    create_kb_response = bedrock_agent_client.create_knowledge_base(\n",
+    "        name = name,\n",
+    "        description = description,\n",
+    "        roleArn = roleArn,\n",
+    "        knowledgeBaseConfiguration = {\n",
+    "            \"type\": \"VECTOR\",\n",
+    "            \"vectorKnowledgeBaseConfiguration\": {\n",
+    "                \"embeddingModelArn\": embeddingModelArn\n",
+    "            }\n",
+    "        },\n",
+    "        storageConfiguration = {\n",
+    "            \"type\": \"OPENSEARCH_SERVERLESS\",\n",
+    "            \"opensearchServerlessConfiguration\":opensearchServerlessConfiguration\n",
+    "        }\n",
+    "    )\n",
+    "    return create_kb_response[\"knowledgeBase\"]"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 16,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [],
+   "source": [
+    "try:\n",
+    "    kb = create_knowledge_base_func()\n",
+    "except Exception as err:\n",
+    "    print(f\"{err=}, {type(err)=}\")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 17,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{ 'createdAt': datetime.datetime(2023, 12, 29, 21, 31, 33, 446830, tzinfo=tzlocal()),\n",
+      "  'description': 'Quantum computing Knowledgebase',\n",
+      "  'knowledgeBaseArn': 'arn:aws:bedrock:us-east-1:133661573128:knowledge-base/NQFMNHRO8I',\n",
+      "  'knowledgeBaseConfiguration': { 'type': 'VECTOR',\n",
+      "                                  'vectorKnowledgeBaseConfiguration': { 'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'}},\n",
+      "  'knowledgeBaseId': 'NQFMNHRO8I',\n",
+      "  'name': 'bedrock-quantum-computing-knowledge-base-345',\n",
+      "  'roleArn': 'arn:aws:iam::133661573128:role/AmazonBedrockExecutionRoleForKnowledgeBase_873',\n",
+      "  'status': 'CREATING',\n",
+      "  'storageConfiguration': { 'opensearchServerlessConfiguration': { 'collectionArn': 'arn:aws:aoss:us-east-1:133661573128:collection/ivu3jemv7yerqjgqfu0i',\n",
+      "                                                                   'fieldMapping': { 'metadataField': 'text-metadata',\n",
+      "                                                                                     'textField': 'text',\n",
+      "                                                                                     'vectorField': 'vector'},\n",
+      "                                                                   'vectorIndexName': 'bedrock-sample-index-345'},\n",
+      "                            'type': 'OPENSEARCH_SERVERLESS'},\n",
+      "  'updatedAt': datetime.datetime(2023, 12, 29, 21, 31, 33, 446830, tzinfo=tzlocal())}\n"
+     ]
+    }
+   ],
+   "source": [
+    "pp.pprint(kb)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 18,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{'ResponseMetadata': {'RequestId': '5763654b-7613-48bc-b4f8-1cce2882207f', 'HTTPStatusCode': 200, 'HTTPHeaders': {'date': 'Fri, 29 Dec 2023 21:31:37 GMT', 'content-type': 'application/json', 'content-length': '931', 'connection': 'keep-alive', 'x-amzn-requestid': '5763654b-7613-48bc-b4f8-1cce2882207f', 'x-amz-apigw-id': 'QuYdGGYkIAMEaXg=', 'x-amzn-trace-id': 'Root=1-658f3ab9-356258223e8c9dbb070e7c59'}, 'RetryAttempts': 0}, 'knowledgeBase': {'knowledgeBaseId': 'NQFMNHRO8I', 'name': 'bedrock-quantum-computing-knowledge-base-345', 'knowledgeBaseArn': 'arn:aws:bedrock:us-east-1:133661573128:knowledge-base/NQFMNHRO8I', 'description': 'Quantum computing Knowledgebase', 'roleArn': 'arn:aws:iam::133661573128:role/AmazonBedrockExecutionRoleForKnowledgeBase_873', 'knowledgeBaseConfiguration': {'type': 'VECTOR', 'vectorKnowledgeBaseConfiguration': {'embeddingModelArn': 'arn:aws:bedrock:us-east-1::foundation-model/amazon.titan-embed-text-v1'}}, 'storageConfiguration': {'type': 'OPENSEARCH_SERVERLESS', 'opensearchServerlessConfiguration': {'collectionArn': 'arn:aws:aoss:us-east-1:133661573128:collection/ivu3jemv7yerqjgqfu0i', 'vectorIndexName': 'bedrock-sample-index-345', 'fieldMapping': {'vectorField': 'vector', 'textField': 'text', 'metadataField': 'text-metadata'}}}, 'status': 'CREATING', 'createdAt': datetime.datetime(2023, 12, 29, 21, 31, 33, 446830, tzinfo=tzlocal()), 'updatedAt': datetime.datetime(2023, 12, 29, 21, 31, 33, 446830, tzinfo=tzlocal())}}\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Get KnowledgeBase \n",
+    "get_kb_response = bedrock_agent_client.get_knowledge_base(knowledgeBaseId = kb['knowledgeBaseId'])\n",
+    "\n",
+    "print(get_kb_response)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {},
+   "source": [
+    "## Step 6 : Creating and Managing Data Source in Knowledge Base"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "Next we need to create a data source, which will be associated with the knowledge base created above. Once the data source is ready, we can then start to ingest the documents.\n",
+    "\n",
+    "- Create a DataSource in KnowledgeBase\n",
+    "- Get DataSource "
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 19,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{ 'createdAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 45838, tzinfo=tzlocal()),\n",
+      "  'dataSourceConfiguration': { 's3Configuration': { 'bucketArn': 'arn:aws:s3:::bedrock-fine-tuning-cloud'},\n",
+      "                               'type': 'S3'},\n",
+      "  'dataSourceId': 'XZ9Y5PPZ8D',\n",
+      "  'description': 'Quantum computing Knowledgebase',\n",
+      "  'knowledgeBaseId': 'NQFMNHRO8I',\n",
+      "  'name': 'bedrock-quantum-computing-knowledge-base-345',\n",
+      "  'status': 'AVAILABLE',\n",
+      "  'updatedAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 45838, tzinfo=tzlocal()),\n",
+      "  'vectorIngestionConfiguration': { 'chunkingConfiguration': { 'chunkingStrategy': 'FIXED_SIZE',\n",
+      "                                                               'fixedSizeChunkingConfiguration': { 'maxTokens': 512,\n",
+      "                                                                                                   'overlapPercentage': 20}}}}\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Create a DataSource in KnowledgeBase \n",
+    "create_ds_response = bedrock_agent_client.create_data_source(\n",
+    "    name = name,\n",
+    "    description = description,\n",
+    "    knowledgeBaseId = kb['knowledgeBaseId'],\n",
+    "    dataSourceConfiguration = {\n",
+    "        \"type\": \"S3\",\n",
+    "        \"s3Configuration\":s3Configuration\n",
+    "    },\n",
+    "    vectorIngestionConfiguration = {\n",
+    "        \"chunkingConfiguration\": chunkingStrategyConfiguration\n",
+    "    }\n",
+    ")\n",
+    "ds = create_ds_response[\"dataSource\"]\n",
+    "pp.pprint(ds)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 20,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "{'ResponseMetadata': {'RequestId': '47c6a7df-be6b-44f6-b7a0-282991873373',\n",
+       "  'HTTPStatusCode': 200,\n",
+       "  'HTTPHeaders': {'date': 'Fri, 29 Dec 2023 21:31:38 GMT',\n",
+       "   'content-type': 'application/json',\n",
+       "   'content-length': '566',\n",
+       "   'connection': 'keep-alive',\n",
+       "   'x-amzn-requestid': '47c6a7df-be6b-44f6-b7a0-282991873373',\n",
+       "   'x-amz-apigw-id': 'QuYdHEaAoAMEUMQ=',\n",
+       "   'x-amzn-trace-id': 'Root=1-658f3aba-25ae89a74520d8bd3e2ddbfb'},\n",
+       "  'RetryAttempts': 0},\n",
+       " 'dataSource': {'knowledgeBaseId': 'NQFMNHRO8I',\n",
+       "  'dataSourceId': 'XZ9Y5PPZ8D',\n",
+       "  'name': 'bedrock-quantum-computing-knowledge-base-345',\n",
+       "  'status': 'AVAILABLE',\n",
+       "  'description': 'Quantum computing Knowledgebase',\n",
+       "  'dataSourceConfiguration': {'type': 'S3',\n",
+       "   's3Configuration': {'bucketArn': 'arn:aws:s3:::bedrock-fine-tuning-cloud'}},\n",
+       "  'vectorIngestionConfiguration': {'chunkingConfiguration': {'chunkingStrategy': 'FIXED_SIZE',\n",
+       "    'fixedSizeChunkingConfiguration': {'maxTokens': 512,\n",
+       "     'overlapPercentage': 20}}},\n",
+       "  'createdAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 45838, tzinfo=tzlocal()),\n",
+       "  'updatedAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 45838, tzinfo=tzlocal())}}"
+      ]
+     },
+     "execution_count": 20,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Get DataSource \n",
+    "bedrock_agent_client.get_data_source(knowledgeBaseId = kb['knowledgeBaseId'], dataSourceId = ds[\"dataSourceId\"])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "## Step 7 : Creating the Sync or Ingestion job\n",
+    "Once the KB and data source is created, we can start the ingestion job.\n",
+    "During the ingestion job, KB will fetch the documents in the data source, pre-process it to extract text, chunk it based on the chunking size provided, create embeddings of each chunk and then write it to the vector database, in this case OSS."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 21,
+   "metadata": {},
+   "outputs": [],
+   "source": [
+    "# Start an ingestion job\n",
+    "start_job_response = bedrock_agent_client.start_ingestion_job(knowledgeBaseId = kb['knowledgeBaseId'], dataSourceId = ds[\"dataSourceId\"])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 22,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{ 'dataSourceId': 'XZ9Y5PPZ8D',\n",
+      "  'ingestionJobId': 'ENLEOBHLD8',\n",
+      "  'knowledgeBaseId': 'NQFMNHRO8I',\n",
+      "  'startedAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 912204, tzinfo=tzlocal()),\n",
+      "  'statistics': { 'numberOfDocumentsDeleted': 0,\n",
+      "                  'numberOfDocumentsFailed': 0,\n",
+      "                  'numberOfDocumentsScanned': 0,\n",
+      "                  'numberOfModifiedDocumentsIndexed': 0,\n",
+      "                  'numberOfNewDocumentsIndexed': 0},\n",
+      "  'status': 'STARTING',\n",
+      "  'updatedAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 912204, tzinfo=tzlocal())}\n"
+     ]
+    }
+   ],
+   "source": [
+    "job = start_job_response[\"ingestionJob\"]\n",
+    "pp.pprint(job)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 23,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "{ 'dataSourceId': 'XZ9Y5PPZ8D',\n",
+      "  'ingestionJobId': 'ENLEOBHLD8',\n",
+      "  'knowledgeBaseId': 'NQFMNHRO8I',\n",
+      "  'startedAt': datetime.datetime(2023, 12, 29, 21, 31, 38, 912204, tzinfo=tzlocal()),\n",
+      "  'statistics': { 'numberOfDocumentsDeleted': 0,\n",
+      "                  'numberOfDocumentsFailed': 0,\n",
+      "                  'numberOfDocumentsScanned': 6,\n",
+      "                  'numberOfModifiedDocumentsIndexed': 0,\n",
+      "                  'numberOfNewDocumentsIndexed': 6},\n",
+      "  'status': 'COMPLETE',\n",
+      "  'updatedAt': datetime.datetime(2023, 12, 29, 21, 33, 0, 74371, tzinfo=tzlocal())}\n"
+     ]
+    }
+   ],
+   "source": [
+    "# Get job status\n",
+    "while(job['status']!='COMPLETE' ):\n",
+    "  get_job_response = bedrock_agent_client.get_ingestion_job(\n",
+    "      knowledgeBaseId = kb['knowledgeBaseId'],\n",
+    "        dataSourceId = ds[\"dataSourceId\"],\n",
+    "        ingestionJobId = job[\"ingestionJobId\"]\n",
+    "  )\n",
+    "  job = get_job_response[\"ingestionJob\"]\n",
+    "pp.pprint(job)\n",
+    "time.sleep(10)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 24,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "'NQFMNHRO8I'\n"
+     ]
+    }
+   ],
+   "source": [
+    "kb_id = kb[\"knowledgeBaseId\"]\n",
+    "pp.pprint(kb_id)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 25,
+   "metadata": {},
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "Stored 'kb_id' (str)\n"
+     ]
+    }
+   ],
+   "source": [
+    "%store kb_id"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "## Step 8 : Testing the Knowledge Base\n",
+    "### Using RetrieveAndGenerate API\n",
+    "Behind the scenes, RetrieveAndGenerate API converts queries into embeddings, searches the knowledge base, and then augments the foundation model prompt with the search results as context information and returns the FM-generated response to the question. For multi-turn conversations, Knowledge Bases manage short-term memory of the conversation to provide more contextual results.\n",
+    "\n",
+    "The output of the RetrieveAndGenerate API includes the generated response, source attribution as well as the retrieved text chunks."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 26,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# try out KB using RetrieveAndGenerate API\n",
+    "bedrock_agent_runtime_client = boto3.client(\"bedrock-agent-runtime\", region_name=region_name)\n",
+    "model_id = \"anthropic.claude-instant-v1\" \n",
+    "model_arn = f'arn:aws:bedrock:us-east-1::foundation-model/{model_id}'"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 27,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "('Quantum computing is a type of computing that utilizes quantum-mechanical '\n",
+      " 'phenomena like superposition and entanglement to perform operations on data. '\n",
+      " 'Some key trends in quantum computing include using it to solve optimization '\n",
+      " 'problems more efficiently, break encryption standards like RSA, and advance '\n",
+      " 'artificial intelligence and machine '\n",
+      " 'learning.<sources><source>1</source><source>2</source></sources> Major '\n",
+      " 'applications of quantum computing that are being explored include '\n",
+      " 'cryptography, optimization, simulation, and artificial intelligence. Quantum '\n",
+      " \"algorithms like Shor's algorithm can factor prime numbers much faster than \"\n",
+      " 'classical computers, while quantum machine learning algorithms may be able '\n",
+      " 'to handle large datasets more '\n",
+      " 'efficiently.<sources><source>1</source><source>3</source></sources>')\n"
+     ]
+    }
+   ],
+   "source": [
+    "query = \"What is quantom computing and what are the trends?\"\n",
+    "response = bedrock_agent_runtime_client.retrieve_and_generate(\n",
+    "    input={\n",
+    "        'text': query\n",
+    "    },\n",
+    "    retrieveAndGenerateConfiguration={\n",
+    "        'type': 'KNOWLEDGE_BASE',\n",
+    "        'knowledgeBaseConfiguration': {\n",
+    "            'knowledgeBaseId': kb_id,\n",
+    "            'modelArn': model_arn\n",
+    "        }\n",
+    "    },\n",
+    ")\n",
+    "\n",
+    "generated_text = response['output']['text']\n",
+    "pp.pprint(generated_text)"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 28,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[ 'It is pos- sible to build algorithms that can run faster on quantum '\n",
+      "  'computers because of the  distinct features of the qubit. Below are some of '\n",
+      "  'the primary applications that we  will see soon in the upcoming era:   • '\n",
+      "  'Cryptography   Many important elements of IT security and online security '\n",
+      "  'such as e-commerce  and electronic secrecy depend on encryption and '\n",
+      "  'mathematical algorithms which  are difficult to break such as factoring '\n",
+      "  'very huge numbers into primes (RSA tech- nique). It is done by traversing '\n",
+      "  'through every possible factor using conventional  computers which takes a '\n",
+      "  'significant amount of time. Also, some modern algorithms  other than RSA '\n",
+      "  'like AES, ECDSA, etc. cannot be cracked using even high com- puting power. '\n",
+      "  'It makes it costly and cracking them even less practical. Quantum  '\n",
+      "  'computers can do all these kinds of stuff in exponentially less amount of '\n",
+      "  'time.  New quantum algorithms (e.g. Shor’s algorithm) are able to do it and '\n",
+      "  'more unique  algorithms will develop [29]. But before that, new encryption '\n",
+      "  'techniques are being  made to resist the quantum ones. Since the already '\n",
+      "  'running techniques and digital  applications security are at greater '\n",
+      "  'risks.   • Optimization Problems   Optimizing a problem implies finding the '\n",
+      "  'best solution to that problem out of all  the possible solutions. It can be '\n",
+      "  'done by minimizing the error and even minimizing  the steps available. '\n",
+      "  'Quantum computers are best in solving optimization problems.  There are a '\n",
+      "  'lot of quantum algorithms out of which quantum optimization algo- rithms '\n",
+      "  'might improve the already existing optimization problems which are solved  '\n",
+      "  'using conventional computers currently. Some of them are quantum '\n",
+      "  'semi-definite  programming, quantum data fitting, and quantum combinatorial '\n",
+      "  'optimization.  Some of the examples include simulating the molecular model '\n",
+      "  'like protein behavior  for medical research which can lead to the new '\n",
+      "  'discovery of drugs for serious dis- eases like cancer, lung disease, etc. '\n",
+      "  'Another example is the Simulation of the cellular  structure of batteries '\n",
+      "  'for improving battery power and life in electric vehicles. It  could also '\n",
+      "  'solve travel-related problems in real traffic just like traveling salesman  '\n",
+      "  'problems to find the shortest path between many cities, going to each city '\n",
+      "  'once and  returning back, modeling the entire finance market, and many '\n",
+      "  'more. Traveling  optimization is the major work under Volkswagen recently '\n",
+      "  '[30].   • Artificial Intelligence   Artificial Intelligence counts on '\n",
+      "  'processing large and complex datasets. It is  responsible for learning, '\n",
+      "  'inferring, and understanding.',\n",
+      "  'Quantum Computing and Communications   14   2. It provides that computing '\n",
+      "  'power which can sufficiently process excessively  large amounts of data '\n",
+      "  '(2.5 Exabyte daily i.e. equal to 5 million laptops) created  all around the '\n",
+      "  'world to extract meaning from it.   3. Due to the teleportation phenomenon '\n",
+      "  'known as ‘quantum tunneling,’ it can  work in parallel and use less amount '\n",
+      "  'of electricity, hence, reducing the power  consumption up to 100 to 1000 '\n",
+      "  'times.   4. A general quantum computer is “thousands of times” faster than '\n",
+      "  'any classical  computer. For example, Google has made a quantum computer '\n",
+      "  '[27] that is 100  million times faster than any classical computer present '\n",
+      "  'in its lab.   5. It can solve complex problems without being overheated '\n",
+      "  'since for its stability it  kept cold up to 0.2 Kelvin inside the quantum '\n",
+      "  'system.   6. It can easily solve optimization problems such as finding the '\n",
+      "  'best route and  scheduling trains and flights. It would also be able to '\n",
+      "  'compute 1 trillion moves  in chess per second. Quantum computers will be '\n",
+      "  'able to crack the highest  security unbreakable encryption techniques. '\n",
+      "  'However, it would also build   hack-proof alternates.   7. It can bring up '\n",
+      "  'revolution from drugs to petroleum industries. The invention of  new drugs '\n",
+      "  'will become possible. The marketable algorithms of financial orga- '\n",
+      "  'nizations can be improved. The field of artificial intelligence can be '\n",
+      "  'improved  soon.   15. Disadvantages of quantum computing   1. Due to '\n",
+      "  'advancements in quantum computers, the security of the existing Inter- net '\n",
+      "  'of Things (IoT) would fall down. Cryptographic techniques, Databases of  '\n",
+      "  'government and private large organizations, banks, and defense systems can  '\n",
+      "  'be hacked. Considering these facts, quantum computers can be terrible for '\n",
+      "  'our  future.   2. The Quantum Computer will work as a different device and '\n",
+      "  'cannot replace  classical computers entirely. Since, classical computers '\n",
+      "  'are better at some chores  than quantum computers like email, excel, etc.   '\n",
+      "  '3. It has not been invented completely yet as only parts are being '\n",
+      "  'implemented and  people are still imagining how it would look.   4. It is '\n",
+      "  'very delicate and error-prone. Any kind of vibrations affects subatomic  '\n",
+      "  'particles like atoms and electrons. Due to which noise, faults, and even  '\n",
+      "  'failures\\xa0are possible. It leads to “Decoherence” which is a loss of '\n",
+      "  'coherence in  quantum.   5.',\n",
+      "  'It is pos- sible to build algorithms that can run faster on quantum '\n",
+      "  'computers because of the  distinct features of the qubit. Below are some of '\n",
+      "  'the primary applications that we  will see soon in the upcoming era:   • '\n",
+      "  'Cryptography   Many important elements of IT security and online security '\n",
+      "  'such as e-commerce  and electronic secrecy depend on encryption and '\n",
+      "  'mathematical algorithms which  are difficult to break such as factoring '\n",
+      "  'very huge numbers into primes (RSA tech- nique). It is done by traversing '\n",
+      "  'through every possible factor using conventional  computers which takes a '\n",
+      "  'significant amount of time. Also, some modern algorithms  other than RSA '\n",
+      "  'like AES, ECDSA, etc. cannot be cracked using even high com- puting power. '\n",
+      "  'It makes it costly and cracking them even less practical. Quantum  '\n",
+      "  'computers can do all these kinds of stuff in exponentially less amount of '\n",
+      "  'time.  New quantum algorithms (e.g. Shor’s algorithm) are able to do it and '\n",
+      "  'more unique  algorithms will develop [29]. But before that, new encryption '\n",
+      "  'techniques are being  made to resist the quantum ones. Since the already '\n",
+      "  'running techniques and digital  applications security are at greater '\n",
+      "  'risks.   • Optimization Problems   Optimizing a problem implies finding the '\n",
+      "  'best solution to that problem out of all  the possible solutions. It can be '\n",
+      "  'done by minimizing the error and even minimizing  the steps available. '\n",
+      "  'Quantum computers are best in solving optimization problems.  There are a '\n",
+      "  'lot of quantum algorithms out of which quantum optimization algo- rithms '\n",
+      "  'might improve the already existing optimization problems which are solved  '\n",
+      "  'using conventional computers currently. Some of them are quantum '\n",
+      "  'semi-definite  programming, quantum data fitting, and quantum combinatorial '\n",
+      "  'optimization.  Some of the examples include simulating the molecular model '\n",
+      "  'like protein behavior  for medical research which can lead to the new '\n",
+      "  'discovery of drugs for serious dis- eases like cancer, lung disease, etc. '\n",
+      "  'Another example is the Simulation of the cellular  structure of batteries '\n",
+      "  'for improving battery power and life in electric vehicles. It  could also '\n",
+      "  'solve travel-related problems in real traffic just like traveling salesman  '\n",
+      "  'problems to find the shortest path between many cities, going to each city '\n",
+      "  'once and  returning back, modeling the entire finance market, and many '\n",
+      "  'more. Traveling  optimization is the major work under Volkswagen recently '\n",
+      "  '[30].   • Artificial Intelligence   Artificial Intelligence counts on '\n",
+      "  'processing large and complex datasets. It is  responsible for learning, '\n",
+      "  'inferring, and understanding.',\n",
+      "  'It has not been invented completely yet as only parts are being implemented '\n",
+      "  'and  people are still imagining how it would look.   4. It is very delicate '\n",
+      "  'and error-prone. Any kind of vibrations affects subatomic  particles like '\n",
+      "  'atoms and electrons. Due to which noise, faults, and even  failures\\xa0are '\n",
+      "  'possible. It leads to “Decoherence” which is a loss of coherence in  '\n",
+      "  'quantum.   5. Quantum processors are very unstable and are very hard to '\n",
+      "  'test even. For the  stability of the quantum computer, it is kept at 0.2 '\n",
+      "  'Kelvin (absolute Kelvin)  which is nearly below the universe temperature '\n",
+      "  '[28]. It is very hard to maintain  and regulate such temperature. The main '\n",
+      "  'problem is to really develop it as a  personal computer with the price '\n",
+      "  'range in the budget of consumers. They will  be firstly accessible to large '\n",
+      "  'scale industry then come to retail markets.        15   Introduction to '\n",
+      "  'Quantum Computing DOI: http://dx.doi.org/10.5772/intechopen.94103   16. '\n",
+      "  'Applications of quantum computing   Many quantum algorithms have been '\n",
+      "  'evolved for quantum computers that  deliver speedup which is a result of '\n",
+      "  'some fundamental mathematical methods like  Fourier transform, Hamiltonian '\n",
+      "  'simulation, etc. Most algorithms require a large  number of qubits of the '\n",
+      "  'best quality and some error correction to provide use- ful functionalities. '\n",
+      "  'These algorithms are formed in blocks rather than as a whole  combined '\n",
+      "  'application since it is not practical. Therefore, it is a great challenge '\n",
+      "  'to  create quantum applications that are really practically useful along '\n",
+      "  'with providing  speedup with no error. The potential utility or say useful '\n",
+      "  'application of a quantum  computer is an area of ongoing research. It is '\n",
+      "  'predicted that those applications  require fewer qubits and can be carried '\n",
+      "  'out with a lesser amount of codes. It is pos- sible to build algorithms '\n",
+      "  'that can run faster on quantum computers because of the  distinct features '\n",
+      "  'of the qubit. Below are some of the primary applications that we  will see '\n",
+      "  'soon in the upcoming era:   • Cryptography   Many important elements of IT '\n",
+      "  'security and online security such as e-commerce  and electronic secrecy '\n",
+      "  'depend on encryption and mathematical algorithms which  are difficult to '\n",
+      "  'break such as factoring very huge numbers into primes (RSA tech- nique). It '\n",
+      "  'is done by traversing through every possible factor using conventional  '\n",
+      "  'computers which takes a significant amount of time.']\n"
+     ]
+    }
+   ],
+   "source": [
+    "## print out the source attribution/citations from the original documents to see if the response generated belongs to the context.\n",
+    "citations = response[\"citations\"]\n",
+    "contexts = []\n",
+    "for citation in citations:\n",
+    "    retrievedReferences = citation[\"retrievedReferences\"]\n",
+    "    for reference in retrievedReferences:\n",
+    "        contexts.append(reference[\"content\"][\"text\"])\n",
+    "\n",
+    "pp.pprint(contexts)"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "### Retrieve API\n",
+    "Retrieve API converts user queries into embeddings, searches the knowledge base, and returns the relevant results, giving you more control to build custom workﬂows on top of the semantic search results. The output of the Retrieve API includes the the retrieved text chunks, the location type and URI of the source data, as well as the relevance scores of the retrievals."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 29,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [],
+   "source": [
+    "# retreive api for fetching only the relevant context.\n",
+    "relevant_documents = bedrock_agent_runtime_client.retrieve(\n",
+    "    retrievalQuery= {\n",
+    "        'text': query\n",
+    "    },\n",
+    "    knowledgeBaseId=kb_id,\n",
+    "    retrievalConfiguration= {\n",
+    "        'vectorSearchConfiguration': {\n",
+    "            'numberOfResults': 3 # will fetch top 3 documents which matches closely with the query.\n",
+    "        }\n",
+    "    }\n",
+    ")"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 30,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [
+    {
+     "name": "stdout",
+     "output_type": "stream",
+     "text": [
+      "[ { 'content': { 'text': 'Small-scale quantum computers are being developed '\n",
+      "                         'recently.  This development is heading towards a '\n",
+      "                         'great future due to their high potential  '\n",
+      "                         'capabilities and advancements in ongoing research. '\n",
+      "                         'Before focusing on the signifi- cances of a '\n",
+      "                         'general-purpose quantum computer and exploring the '\n",
+      "                         'power of the new  arising technology, it is better '\n",
+      "                         'to review the origin, potentials, and limitations '\n",
+      "                         'of  the existing traditional computing. This '\n",
+      "                         'information helps us in understanding the  possible '\n",
+      "                         'challenges in developing exotic and competitive '\n",
+      "                         'technology. It will also give  us an insight into '\n",
+      "                         'the ongoing progress in this field.   Keywords: '\n",
+      "                         'quantum computing, real-time systems, program '\n",
+      "                         'processors   1. History of computing   Evolution in '\n",
+      "                         'one region of science and technology leads to the '\n",
+      "                         'discovery of a  new one. In less than a century, '\n",
+      "                         'research and development of functional computing  '\n",
+      "                         'technologies have renovated science, technology, and '\n",
+      "                         'nation massively. The first  practical computer '\n",
+      "                         'around the 20th century was not capable of doing '\n",
+      "                         'mathematical  computations, on its own. Practical '\n",
+      "                         'devices need a solid physical implementation  of '\n",
+      "                         'theoretical concepts. Nowadays, computers are '\n",
+      "                         'solving problems instantly  and accurately provided '\n",
+      "                         'the input is relevant, and a set of instructions '\n",
+      "                         'given are         Quantum Computing and '\n",
+      "                         'Communications   2   favorable. It all started from '\n",
+      "                         'World War II when Alan Turing created a real '\n",
+      "                         'general- purpose computer with a storable program '\n",
+      "                         'model and is known as the ‘Universal  Turing '\n",
+      "                         'Machine’. It was redesigned by Von Neumann and is '\n",
+      "                         'now the most important  architecture for almost '\n",
+      "                         'every computer. The computers and their physical '\n",
+      "                         'parts kept  improving with time in terms of '\n",
+      "                         'performance and their strengths. And gradually,  the '\n",
+      "                         'industry of computers became larger than the '\n",
+      "                         'military department which initi- ated it. The '\n",
+      "                         'advancement in control and understanding of humans '\n",
+      "                         'over nature and  physical systems has given us the '\n",
+      "                         'latest electronic devices we are utilizing today '\n",
+      "                         '[1].   2. A new kind of computing   Today’s '\n",
+      "                         'computers are smaller, cheaper, faster, greatly '\n",
+      "                         'efficient, and even more  powerful as compared to '\n",
+      "                         'early computers that used to be huge, costly, and '\n",
+      "                         'more  power-consuming. It becomes possible due to '\n",
+      "                         'improvements in architecture,  hardware components, '\n",
+      "                         'and software running on them. Electronic circuits '\n",
+      "                         'used in  computers are getting smaller and smaller '\n",
+      "                         'day by day. Transistors are small semi- conductor '\n",
+      "                         'devices that are used to amplify and also switch '\n",
+      "                         'electric or electronic  signals. They were used to '\n",
+      "                         'be fabricated on a piece of silicon. The circuit was '\n",
+      "                         'made  by connecting these transistors together into '\n",
+      "                         'a single silicon surface.'},\n",
+      "    'location': { 's3Location': { 'uri': 's3://bedrock-fine-tuning-cloud/knowledge-base/Introduction_to_Quantum_Computing.pdf'},\n",
+      "                  'type': 'S3'},\n",
+      "    'score': 0.006682467},\n",
+      "  { 'content': { 'text': 'Quantum Computing and Communications   18   Author '\n",
+      "                         'details   Surya Teja\\xa0Marella* and Hemanth Sai '\n",
+      "                         'Kumar\\xa0Parisa University of Leicester, Leicester, '\n",
+      "                         'UK   *Address all correspondence to: '\n",
+      "                         'suryatejamarella@gmail.com   19. Future scope of '\n",
+      "                         'quantum computing   A significant amount of struggle '\n",
+      "                         'is remaining before a practical quantum  computer '\n",
+      "                         'can be launched. There are some future advancements '\n",
+      "                         'that are needed.  Some of the future needs are '\n",
+      "                         'enabling a Quantum Error Correction algorithm that  '\n",
+      "                         'requires low overhead and decreases the error rates '\n",
+      "                         'in qubits, developing more  algorithms with lesser '\n",
+      "                         'qubits for solving problems, reducing circuit '\n",
+      "                         'thickness so  that NISQ computers can be operated, '\n",
+      "                         'the advancement of methods which can  verify, debug, '\n",
+      "                         'and simulate the quantum computers, scaling the '\n",
+      "                         'number of qubits  per processor in such a way so '\n",
+      "                         'that error rate is maintained or can be improved if  '\n",
+      "                         'possible, interleaving of operations in a qubit, '\n",
+      "                         'recognizing more algorithms that can  reduce the '\n",
+      "                         'computation time and creating input–output for the '\n",
+      "                         'quantum processor.   Such ‘Quantum games’ are '\n",
+      "                         'predicted in the future that will give unexpected  '\n",
+      "                         'situations and results that a player can experience '\n",
+      "                         'because quantum computers will  take all the '\n",
+      "                         'possible operations and throws them into the game '\n",
+      "                         'randomly due to its  quantum properties like '\n",
+      "                         'superpositioning and entanglement of qubits. It will '\n",
+      "                         'be a  never-ending experience.   ‘Quantum computing '\n",
+      "                         'in Cloud’ has the potential to overtake business '\n",
+      "                         'initiatives  like in other emerging technologies '\n",
+      "                         'such as cryptography and artificial Intelligence.  '\n",
+      "                         'Since the classical simulation of fifty qubits is '\n",
+      "                         'equal to the memory of one Petabyte  that doubles '\n",
+      "                         'with every single qubit added [35], the memory '\n",
+      "                         'required should also be  large enough to provide an '\n",
+      "                         'environment for application development and testing '\n",
+      "                         'for  multiple developers to simulate quantum '\n",
+      "                         'computers using suitable shared resources.   AI and '\n",
+      "                         'machine learning problems could be solved in a '\n",
+      "                         'practical amount of time  that can be reduced from '\n",
+      "                         'hundreds of thousands of years to seconds. Several '\n",
+      "                         'quan- tum algorithms have been developed such as '\n",
+      "                         'Grover’s algorithm for searching and  Shor’s '\n",
+      "                         'algorithm for factoring large numbers. More quantum '\n",
+      "                         'algorithms are coming  soon. Google has also '\n",
+      "                         'declared that it would produce a workable quantum '\n",
+      "                         'computer  in the following 5\\xa0years with a '\n",
+      "                         '50-qubit quantum computer and will achieve quan- tum '\n",
+      "                         'supremacy. IBM is also offering commercial quantum '\n",
+      "                         'computers soon.   The progress of development in the '\n",
+      "                         'field of quantum computers depends on  many factors. '\n",
+      "                         'Interest and financial support from the private '\n",
+      "                         'sector can help devel- oping commercial applications '\n",
+      "                         'for NISQ computers.'},\n",
+      "    'location': { 's3Location': { 'uri': 's3://bedrock-fine-tuning-cloud/knowledge-base/Introduction_to_Quantum_Computing.pdf'},\n",
+      "                  'type': 'S3'},\n",
+      "    'score': 0.0066801487},\n",
+      "  { 'content': { 'text': 'It has not been invented completely yet as only '\n",
+      "                         'parts are being implemented and  people are still '\n",
+      "                         'imagining how it would look.   4. It is very '\n",
+      "                         'delicate and error-prone. Any kind of vibrations '\n",
+      "                         'affects subatomic  particles like atoms and '\n",
+      "                         'electrons. Due to which noise, faults, and even  '\n",
+      "                         'failures\\xa0are possible. It leads to “Decoherence” '\n",
+      "                         'which is a loss of coherence in  quantum.   5. '\n",
+      "                         'Quantum processors are very unstable and are very '\n",
+      "                         'hard to test even. For the  stability of the quantum '\n",
+      "                         'computer, it is kept at 0.2 Kelvin (absolute '\n",
+      "                         'Kelvin)  which is nearly below the universe '\n",
+      "                         'temperature [28]. It is very hard to maintain  and '\n",
+      "                         'regulate such temperature. The main problem is to '\n",
+      "                         'really develop it as a  personal computer with the '\n",
+      "                         'price range in the budget of consumers. They will  '\n",
+      "                         'be firstly accessible to large scale industry then '\n",
+      "                         'come to retail markets.        15   Introduction to '\n",
+      "                         'Quantum Computing DOI: '\n",
+      "                         'http://dx.doi.org/10.5772/intechopen.94103   16. '\n",
+      "                         'Applications of quantum computing   Many quantum '\n",
+      "                         'algorithms have been evolved for quantum computers '\n",
+      "                         'that  deliver speedup which is a result of some '\n",
+      "                         'fundamental mathematical methods like  Fourier '\n",
+      "                         'transform, Hamiltonian simulation, etc. Most '\n",
+      "                         'algorithms require a large  number of qubits of the '\n",
+      "                         'best quality and some error correction to provide '\n",
+      "                         'use- ful functionalities. These algorithms are '\n",
+      "                         'formed in blocks rather than as a whole  combined '\n",
+      "                         'application since it is not practical. Therefore, it '\n",
+      "                         'is a great challenge to  create quantum applications '\n",
+      "                         'that are really practically useful along with '\n",
+      "                         'providing  speedup with no error. The potential '\n",
+      "                         'utility or say useful application of a quantum  '\n",
+      "                         'computer is an area of ongoing research. It is '\n",
+      "                         'predicted that those applications  require fewer '\n",
+      "                         'qubits and can be carried out with a lesser amount '\n",
+      "                         'of codes. It is pos- sible to build algorithms that '\n",
+      "                         'can run faster on quantum computers because of the  '\n",
+      "                         'distinct features of the qubit. Below are some of '\n",
+      "                         'the primary applications that we  will see soon in '\n",
+      "                         'the upcoming era:   • Cryptography   Many important '\n",
+      "                         'elements of IT security and online security such as '\n",
+      "                         'e-commerce  and electronic secrecy depend on '\n",
+      "                         'encryption and mathematical algorithms which  are '\n",
+      "                         'difficult to break such as factoring very huge '\n",
+      "                         'numbers into primes (RSA tech- nique). It is done by '\n",
+      "                         'traversing through every possible factor using '\n",
+      "                         'conventional  computers which takes a significant '\n",
+      "                         'amount of time.'},\n",
+      "    'location': { 's3Location': { 'uri': 's3://bedrock-fine-tuning-cloud/knowledge-base/Introduction_to_Quantum_Computing.pdf'},\n",
+      "                  'type': 'S3'},\n",
+      "    'score': 0.0065182503}]\n"
+     ]
+    }
+   ],
+   "source": [
+    "pp.pprint(relevant_documents[\"retrievalResults\"])"
+   ]
+  },
+  {
+   "cell_type": "markdown",
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "source": [
+    "## Step 9 : Cleanup - Caution\n",
+    "Please make sure to comment the below section if you are planning to use the Knowledge Base that you created above for building your RAG application.\n",
+    "If you only wanted to try out creating the KB using SDK, then please make sure to delete all the resources that were created as you will be incurred cost for storing documents in OSS index."
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 31,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "{'ResponseMetadata': {'RequestId': 'b8551fbe-bb60-4e09-88d9-ef9b4657bb00',\n",
+       "  'HTTPStatusCode': 200,\n",
+       "  'HTTPHeaders': {'x-amzn-requestid': 'b8551fbe-bb60-4e09-88d9-ef9b4657bb00',\n",
+       "   'content-type': 'application/x-amz-json-1.0',\n",
+       "   'content-length': '2',\n",
+       "   'date': 'Fri, 29 Dec 2023 21:33:15 GMT'},\n",
+       "  'RetryAttempts': 0}}"
+      ]
+     },
+     "execution_count": 31,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# Delete KnowledgeBase\n",
+    "bedrock_agent_client.delete_data_source(dataSourceId = ds[\"dataSourceId\"], knowledgeBaseId=kb['knowledgeBaseId'])\n",
+    "bedrock_agent_client.delete_knowledge_base(knowledgeBaseId=kb['knowledgeBaseId'])\n",
+    "oss_client.indices.delete(index=index_name)\n",
+    "aoss_client.delete_collection(id=collection_id)\n",
+    "aoss_client.delete_access_policy(type=\"data\", name=access_policy['accessPolicyDetail']['name'])\n",
+    "aoss_client.delete_security_policy(type=\"network\", name=network_policy['securityPolicyDetail']['name'])\n",
+    "aoss_client.delete_security_policy(type=\"encryption\", name=encryption_policy['securityPolicyDetail']['name'])"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": 32,
+   "metadata": {},
+   "outputs": [
+    {
+     "data": {
+      "text/plain": [
+       "0"
+      ]
+     },
+     "execution_count": 32,
+     "metadata": {},
+     "output_type": "execute_result"
+    }
+   ],
+   "source": [
+    "# delete role and policies\n",
+    "from utility import delete_iam_role_and_policies\n",
+    "delete_iam_role_and_policies()"
+   ]
+  },
+  {
+   "cell_type": "code",
+   "execution_count": null,
+   "metadata": {
+    "collapsed": false,
+    "jupyter": {
+     "outputs_hidden": false
+    }
+   },
+   "outputs": [],
+   "source": []
+  }
+ ],
+ "metadata": {
+  "kernelspec": {
+   "display_name": "Python 3 (ipykernel)",
+   "language": "python",
+   "name": "python3"
+  },
+  "language_info": {
+   "codemirror_mode": {
+    "name": "ipython",
+    "version": 3
+   },
+   "file_extension": ".py",
+   "mimetype": "text/x-python",
+   "name": "python",
+   "nbconvert_exporter": "python",
+   "pygments_lexer": "ipython3",
+   "version": "3.10.13"
+  }
+ },
+ "nbformat": 4,
+ "nbformat_minor": 4
+}
