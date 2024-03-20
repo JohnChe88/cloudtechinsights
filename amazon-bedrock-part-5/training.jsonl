@@ -1,1 +1,6 @@
-
+{"input": "I absolutely loved the latest superhero movie. It was full of action and had a great storyline.", "output": "Positive"}
+{"input": "Unfortunately, my experience at the cafe was less than ideal. The coffee was too bitter and the service was slow.", "output": "Negative"}
+{"input": "This book is a masterpiece, blending intricate plotlines with deep character development.", "output": "Positive"}
+{"input": "The software update was a disappointment, as it introduced more bugs than it fixed.", "output": "Negative"}
+{"input": "Our vacation was fantastic! The beaches were pristine and the hotel staff was incredibly hospitable.", "output": "Positive"}
+{"input": "I'm not happy with my new headphones. The sound quality is poor and they're uncomfortable to wear.", "output": "Negative"}
