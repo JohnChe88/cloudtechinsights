@@ -1,0 +1,10 @@
+CREATE TABLE customer_sales (
+    customerID VARCHAR(20) NOT NULL,
+    region VARCHAR(50),
+    sales NUMERIC(10, 2)
+);
+
+COPY customer_sales
+FROM
+  's3://amazon-sagemaker-<account_id>-us-east-1-/dzd_6123456/12345/files/retail_sales_performance.csv'
+  IAM_ROLE 'arn:aws:iam::<account_id>:role/datazone_usr_role_' DELIMITER ',' IGNOREHEADER 1;
